@@ -48,8 +48,6 @@ phony {
 
 cc_library_headers {
     name: "libhidl_gtest_helper",
-    vendor_available: true,
-    host_supported: true,
     export_include_dirs: ["gtest_helper"],
 }
 
@@ -58,7 +56,6 @@ cc_test {
     host_supported: true,
     defaults: ["libhidl-defaults"],
     gtest: false,
-    tidy_timeout_srcs: ["test_main.cpp"],
     srcs: ["test_main.cpp"],
     test_suites: ["device-tests"],
 
@@ -98,7 +95,7 @@ cc_library {
         "//apex_available:platform",
         "com.android.neuralnetworks",
         "test_com.android.neuralnetworks",
-        "com.android.bluetooth",
+        "com.android.bluetooth.updatable",
         "com.android.media",
         "com.android.media.swcodec",
         "com.android.tethering",
@@ -111,10 +108,23 @@ cc_library {
         "libhwbinder-impl-internal",
     ],
     min_sdk_version: "29",
-    afdo: true,
-    header_abi_checker: {
-        diff_flags: ["-allow-adding-removing-weak-symbols"],
-    },
+}
+
+// Only libhwbinder_benchmark needs to have pgo enabled. When all places
+// support having PGO selectively enabled, all places can use libhwbinder.
+//
+// http://b/77320844
+cc_library {
+    name: "libhidlbase_pgo",
+    defaults: [
+        "libhidlbase-combined-impl",
+        "hwbinder_benchmark_pgo",
+    ],
+    whole_static_libs: [
+        "libhwbinder_pgo-impl-internal",
+    ],
+
+    visibility: ["//system/libhwbinder:__subpackages__"],
 }
 
 // WARNING: deprecated
