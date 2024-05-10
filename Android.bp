@@ -13,6 +13,7 @@
 // limitations under the License.
 
 package {
+    default_team: "trendy_team_android_kernel",
     default_applicable_licenses: ["system_libhidl_license"],
 }
 
@@ -101,20 +102,15 @@ cc_library {
         "com.android.btservices",
         "com.android.media",
         "com.android.media.swcodec",
+        "com.android.nfcservices",
         "com.android.tethering",
     ],
-    vndk: {
-        enabled: true,
-        support_system_process: true,
-    },
+    double_loadable: true,
     whole_static_libs: [
         "libhwbinder-impl-internal",
     ],
     min_sdk_version: "29",
     afdo: true,
-    header_abi_checker: {
-        diff_flags: ["-allow-adding-removing-weak-symbols"],
-    },
 }
 
 // WARNING: deprecated
@@ -129,6 +125,7 @@ cc_library {
         "//hardware:__subpackages__",
         "//test/sts:__subpackages__",
         "//vendor:__subpackages__",
+        "//visibility:any_system_partition",
     ],
 }
 

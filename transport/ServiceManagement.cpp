@@ -17,6 +17,7 @@
 #define LOG_TAG "HidlServiceManagement"
 
 #ifdef __ANDROID__
+#include <android/api-level.h>
 #include <android/dlext.h>
 #endif  // __ANDROID__
 
@@ -44,6 +45,7 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <hwbinder/HidlSupport.h>
 #include <hwbinder/IPCThreadState.h>
 #include <hwbinder/Parcel.h>
 #if !defined(__ANDROID_RECOVERY__) && defined(__ANDROID__)
@@ -70,19 +72,8 @@ static constexpr bool kIsRecovery = true;
 static constexpr bool kIsRecovery = false;
 #endif
 
-static void waitForHwServiceManager() {
-    // TODO(b/31559095): need bionic host so that we can use 'prop_info' returned
-    // from WaitForProperty
-#ifdef __ANDROID__
-    static const char* kHwServicemanagerReadyProperty = "hwservicemanager.ready";
-
-    using std::literals::chrono_literals::operator""s;
-
-    using android::base::WaitForProperty;
-    while (!WaitForProperty(kHwServicemanagerReadyProperty, "true", 1s)) {
-        LOG(WARNING) << "Waited for hwservicemanager.ready for a second, waiting another...";
-    }
-#endif  // __ANDROID__
+bool isHidlSupported() {
+    return isHwbinderSupportedBlocking();
 }
 
 static std::string binaryName() {
@@ -209,9 +200,6 @@ static bool isServiceManager(const hidl_string& fqName) {
     return fqName == IServiceManager1_0::descriptor || fqName == IServiceManager1_1::descriptor ||
            fqName == IServiceManager1_2::descriptor;
 }
-static bool isHwServiceManagerInstalled() {
-    return access("/system/bin/hwservicemanager", F_OK) == 0;
-}
 
 /*
  * A replacement for hwservicemanager when it is not installed on a device.
@@ -222,7 +210,7 @@ static bool isHwServiceManagerInstalled() {
  * to be able service the requests and tell clients there are no services
  * registered.
  */
-struct NoHwServiceManager : public IServiceManager1_2 {
+struct NoHwServiceManager : public IServiceManager1_2, hidl_death_recipient {
     Return<sp<IBase>> get(const hidl_string& fqName, const hidl_string&) override {
         sp<IBase> ret = nullptr;
 
@@ -238,9 +226,15 @@ struct NoHwServiceManager : public IServiceManager1_2 {
     }
 
     Return<Transport> getTransport(const hidl_string& fqName, const hidl_string& name) {
+        // We pretend like IServiceManager is declared for
+        // IServiceManager::getService to return this NoHwServiceManager
+        // instance
+        if (isServiceManager(fqName)) {
+            return Transport::HWBINDER;
+        }
         LOG(INFO) << "Trying to get transport of " << fqName << "/" << name
                   << " without hwservicemanager";
-        return Transport::PASSTHROUGH;
+        return Transport::EMPTY;
     }
 
     Return<void> list(list_cb _hidl_cb) override {
@@ -254,11 +248,49 @@ struct NoHwServiceManager : public IServiceManager1_2 {
         return Void();
     }
 
+    void serviceDied(uint64_t /* cookie */, const wp<IBase>& who) override {
+        sp<IBase> promoted = who.promote();
+        if (promoted) {
+            bool removed = false;
+            for (auto [name, callbacks] : mServiceNotifications) {
+                for (auto it = callbacks.begin(); it != callbacks.end();) {
+                    if (interfacesEqual(*it, promoted)) {
+                        callbacks.erase(it);
+                        removed = true;
+                    }
+                    it++;
+                }
+                if (removed) return;
+            }
+        }
+        LOG(ERROR) << "Could not find a registered callback for a service who died. "
+                   << "Service pointer: " << who.promote().get();
+    }
+
     Return<bool> registerForNotifications(const hidl_string& fqName, const hidl_string& name,
-                                          const sp<IServiceNotification>& /* callback */) override {
-        LOG(INFO) << "Cannot register for notifications for " << fqName << "/" << name
-                  << " without hwservicemanager";
-        return false;
+                                          const sp<IServiceNotification>& callback) override {
+        LOG(INFO) << "Will not get any notifications for " << fqName << "/" << name
+                  << " without hwservicemanager but keeping the callback.";
+        if (callback == nullptr) {
+            LOG(ERROR) << "Cannot register a null callback for " << fqName << "/" << name;
+            return false;
+        }
+        bool ret = callback->linkToDeath(this, 0);
+        if (!ret) {
+            LOG(ERROR) << "Failed to register death recipient for " << fqName << "/" << name;
+            return false;
+        }
+
+        auto [it, inserted] = mServiceNotifications[static_cast<std::string>(fqName) + "/" +
+                                                    static_cast<std::string>(name)]
+                                      .insert(callback);
+        if (!inserted) {
+            LOG(WARNING) << "This callback for " << fqName << "/" << name
+                         << " was already registered so "
+                         << "we are not keeping a reference to this one.";
+            return false;
+        }
+        return true;
     }
 
     Return<void> debugDump(debugDump_cb _hidl_cb) override {
@@ -274,13 +306,19 @@ struct NoHwServiceManager : public IServiceManager1_2 {
         return Void();
     }
 
-    Return<bool> unregisterForNotifications(
-            const hidl_string& fqName, const hidl_string& name,
-            const sp<IServiceNotification>& /* callback */) override {
-        LOG(INFO) << "Cannot unregister for notifications for " << fqName << "/" << name
-                  << " without hwservicemanager";
-        return false;
+    Return<bool> unregisterForNotifications(const hidl_string& fqName, const hidl_string& name,
+                                            const sp<IServiceNotification>& callback) override {
+        auto ret = mServiceNotifications[static_cast<std::string>(fqName) + "/" +
+                                         static_cast<std::string>(name)]
+                           .erase(callback);
+        if (!ret) {
+            LOG(WARNING) << "This callback for " << fqName << "/" << name << " was not previously "
+                         << "registered so there is nothing to do.";
+            return false;
+        }
+        return true;
     }
+
     Return<bool> registerClientCallback(const hidl_string& fqName, const hidl_string& name,
                                         const sp<IBase>&, const sp<IClientCallback>&) {
         LOG(INFO) << "Cannot add client callback for " << fqName << "/" << name
@@ -306,6 +344,9 @@ struct NoHwServiceManager : public IServiceManager1_2 {
                   << " without hwservicemanager";
         return false;
     }
+
+  private:
+    std::map<std::string, std::set<sp<IServiceNotification>>> mServiceNotifications;
 };
 
 sp<IServiceManager1_2> defaultServiceManager1_2() {
@@ -321,19 +362,18 @@ sp<IServiceManager1_2> defaultServiceManager1_2() {
             return gDefaultServiceManager;
         }
 
-        if (!isHwServiceManagerInstalled()) {
-            // hwservicemanager is not available on this device.
-            gDefaultServiceManager = sp<NoHwServiceManager>::make();
-            return gDefaultServiceManager;
-        }
-
         if (access("/dev/hwbinder", F_OK|R_OK|W_OK) != 0) {
             // HwBinder not available on this device or not accessible to
             // this process.
             return nullptr;
         }
 
-        waitForHwServiceManager();
+        if (!isHidlSupported()) {
+            // hwservicemanager is not available on this device.
+            LOG(WARNING) << "hwservicemanager is not supported on the device.";
+            gDefaultServiceManager = sp<NoHwServiceManager>::make();
+            return gDefaultServiceManager;
+        }
 
         while (gDefaultServiceManager == nullptr) {
             gDefaultServiceManager =
@@ -526,7 +566,7 @@ struct PassthroughServiceManager : IServiceManager1_1 {
         // This is required to run without hwservicemanager while we have
         // passthrough HIDL services. Once the passthrough HIDL services have
         // been removed, the PassthroughServiceManager will no longer be needed.
-        if (!isHwServiceManagerInstalled() && isServiceManager(fqName)) {
+        if (!isHidlSupported() && isServiceManager(fqName)) {
             return defaultServiceManager1_2();
         }
 
