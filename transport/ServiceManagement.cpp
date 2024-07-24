@@ -45,6 +45,7 @@
 #include <android-base/properties.h>
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
+#include <hwbinder/HidlSupport.h>
 #include <hwbinder/IPCThreadState.h>
 #include <hwbinder/Parcel.h>
 #if !defined(__ANDROID_RECOVERY__) && defined(__ANDROID__)
@@ -71,19 +72,8 @@ static constexpr bool kIsRecovery = true;
 static constexpr bool kIsRecovery = false;
 #endif
 
-static void waitForHwServiceManager() {
-    // TODO(b/31559095): need bionic host so that we can use 'prop_info' returned
-    // from WaitForProperty
-#ifdef __ANDROID__
-    static const char* kHwServicemanagerReadyProperty = "hwservicemanager.ready";
-
-    using std::literals::chrono_literals::operator""s;
-
-    using android::base::WaitForProperty;
-    while (!WaitForProperty(kHwServicemanagerReadyProperty, "true", 1s)) {
-        LOG(WARNING) << "Waited for hwservicemanager.ready for a second, waiting another...";
-    }
-#endif  // __ANDROID__
+bool isHidlSupported() {
+    return isHwbinderSupportedBlocking();
 }
 
 static std::string binaryName() {
@@ -209,31 +199,6 @@ sp<IServiceManager1_1> defaultServiceManager1_1() {
 static bool isServiceManager(const hidl_string& fqName) {
     return fqName == IServiceManager1_0::descriptor || fqName == IServiceManager1_1::descriptor ||
            fqName == IServiceManager1_2::descriptor;
-}
-
-static bool isHwServiceManagerInstalled() {
-    return access("/system_ext/bin/hwservicemanager", F_OK) == 0 ||
-           access("/system/system_ext/bin/hwservicemanager", F_OK) == 0 ||
-           access("/system/bin/hwservicemanager", F_OK) == 0;
-}
-
-bool isHidlSupported() {
-    if (!isHwServiceManagerInstalled()) {
-        return false;
-    }
-#ifdef __ANDROID__
-    // TODO(b/218588089) remove this temporary support variable once Cuttlefish
-    // (the only current Android V launching device) no longer requires HIDL.
-    constexpr bool kTempHidlSupport = true;
-    static const char* kVendorApiProperty = "ro.vendor.api_level";
-    // HIDL and hwservicemanager are not supported in Android V+
-    return android::base::GetIntProperty(kVendorApiProperty, 0) < __ANDROID_API_V__ ||
-           kTempHidlSupport;
-#else
-    // No access to properties and no requirement for dropping HIDL support if
-    // this isn't Android
-    return true;
-#endif  // __ANDROID__
 }
 
 /*
@@ -397,20 +362,18 @@ sp<IServiceManager1_2> defaultServiceManager1_2() {
             return gDefaultServiceManager;
         }
 
-        if (!isHidlSupported()) {
-            // hwservicemanager is not available on this device.
-            LOG(WARNING) << "hwservicemanager is not supported on the device.";
-            gDefaultServiceManager = sp<NoHwServiceManager>::make();
-            return gDefaultServiceManager;
-        }
-
         if (access("/dev/hwbinder", F_OK|R_OK|W_OK) != 0) {
             // HwBinder not available on this device or not accessible to
             // this process.
             return nullptr;
         }
 
-        waitForHwServiceManager();
+        if (!isHidlSupported()) {
+            // hwservicemanager is not available on this device.
+            LOG(WARNING) << "hwservicemanager is not supported on the device.";
+            gDefaultServiceManager = sp<NoHwServiceManager>::make();
+            return gDefaultServiceManager;
+        }
 
         while (gDefaultServiceManager == nullptr) {
             gDefaultServiceManager =
