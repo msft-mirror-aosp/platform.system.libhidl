@@ -34,7 +34,10 @@
             <instance>default</instance>
         </interface>
     </hal>
-    <hal format="aidl" optional="false">
+    <!--
+          vibrator is installed for all form factors except TV
+    -->
+    <hal format="aidl" optional="true">
         <name>android.frameworks.vibrator</name>
         <interface>
             <name>IVibratorControlService</name>
