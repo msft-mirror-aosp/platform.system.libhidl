@@ -42,3 +42,19 @@ vintf_data {
     filename: "manifest.xml",
     system_ext_specific: true,
 }
+
+// Device Manifest
+vintf_data {
+    name: "vendor_manifest.xml",
+    type: "vendor_manifest",
+    filename: "manifest.xml",
+    vendor: true,
+}
+
+// Odm Manifest
+vintf_data {
+    name: "odm_manifest.xml",
+    type: "odm_manifest",
+    filename: "manifest.xml",
+    device_specific: true,
+}
