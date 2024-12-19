@@ -98,7 +98,6 @@ cc_library {
         // - no testing story/infra for deprecation schedule
         "//apex_available:platform",
         "com.android.neuralnetworks",
-        "test_com.android.neuralnetworks",
         "com.android.btservices",
         "com.android.media",
         "com.android.media.swcodec",
