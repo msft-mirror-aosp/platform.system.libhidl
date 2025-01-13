@@ -5,9 +5,16 @@
     -->
     <hal format="aidl" optional="true">
         <name>android.frameworks.cameraservice.service</name>
-        <version>2</version>
+        <version>3</version>
         <interface>
             <name>ICameraService</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <hal format="aidl" optional="false">
+        <name>android.frameworks.devicestate</name>
+        <interface>
+            <name>IDeviceStateService</name>
             <instance>default</instance>
         </interface>
     </hal>
@@ -64,7 +71,7 @@
     </hal>
     <hal format="aidl" optional="false">
         <name>android.system.keystore2</name>
-        <version>4</version>
+        <version>5</version>
         <interface>
             <name>IKeystoreService</name>
             <instance>default</instance>
@@ -81,6 +88,13 @@
         <name>android.system.suspend</name>
         <interface>
             <name>ISystemSuspend</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+    <hal format="aidl" optional="false">
+        <name>android.system.vold</name>
+        <interface>
+            <name>IVold</name>
             <instance>default</instance>
         </interface>
     </hal>
