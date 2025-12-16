@@ -145,11 +145,7 @@ __attribute__((noinline)) static void tryShortenProcessName(const std::string& d
 
 namespace details {
 
-#ifdef ENFORCE_VINTF_MANIFEST
-static constexpr bool kEnforceVintfManifest = true;
-#else
-static constexpr bool kEnforceVintfManifest = false;
-#endif
+
 
 static bool* getTrebleTestingOverridePtr() {
     static bool gTrebleTestingOverride = false;
@@ -169,7 +165,7 @@ static inline bool isTrebleTestingOverride() {
     // return false early so we don't need to check the debuggable property
     if (!*getTrebleTestingOverridePtr()) return false;
 
-    if (kEnforceVintfManifest && !isDebuggable()) {
+    if (!isDebuggable()) {
         // don't allow testing override in production
         return false;
     }
@@ -924,18 +920,8 @@ sp<::android::hidl::base::V1_0::IBase> getRawServiceInternal(const std::string& 
     const bool vintfHwbinder = (transport == Transport::HWBINDER);
     const bool vintfPassthru = (transport == Transport::PASSTHROUGH);
     const bool trebleTestingOverride = isTrebleTestingOverride();
-    const bool allowLegacy = !kEnforceVintfManifest || (trebleTestingOverride && isDebuggable());
+    const bool allowLegacy = (trebleTestingOverride && isDebuggable());
     const bool vintfLegacy = (transport == Transport::EMPTY) && allowLegacy;
-
-    if (!kEnforceVintfManifest) {
-        ALOGE("getService: Potential race detected. The VINTF manifest is not being enforced. If "
-              "a HAL server has a delay in starting and it is not in the manifest, it will not be "
-              "retrieved. Please make sure all HALs on this device are in the VINTF manifest and "
-              "enable PRODUCT_ENFORCE_VINTF_MANIFEST on this device (this is also enabled by "
-              "PRODUCT_FULL_TREBLE). PRODUCT_ENFORCE_VINTF_MANIFEST will ensure that no race "
-              "condition is possible here.");
-        sleep(1);
-    }
 
     for (int tries = 0; !getStub && (vintfHwbinder || vintfLegacy); tries++) {
         if (waiter == nullptr && tries > 0) {
@@ -1004,7 +990,7 @@ status_t registerAsServiceInternal(const sp<IBase>& service, const std::string& 
 
     const std::string descriptor = getDescriptor(service.get());
 
-    if (kEnforceVintfManifest && !isTrebleTestingOverride()) {
+    if (!isTrebleTestingOverride()) {
         using Transport = IServiceManager1_0::Transport;
         Return<Transport> transport = sm->getTransport(descriptor, name);
 
