@@ -214,9 +214,6 @@ cc_defaults {
         debuggable: {
             cflags: ["-DLIBHIDL_TARGET_DEBUGGABLE"],
         },
-        enforce_vintf_manifest: {
-            cflags: ["-DENFORCE_VINTF_MANIFEST"],
-        },
     },
 
     sanitize: {
